@@ -63,70 +63,82 @@ class PumpFunApp {
     }
 
     async fetchMockData() {
-        // Simulate API delay
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        try {
+            // Fetch real data from PumpFun API
+            const response = await fetch('https://api.pulstream.so/streamstats?limit=20&offset=0&sort_by=num_participants&sort_order=DESC');
+            
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            
+            const apiData = await response.json();
+            
+            // Transform API data to our app format
+            return apiData.data.data.map((stream, index) => ({
+                id: stream.id,
+                title: stream.name || `Stream ${index + 1}`,
+                symbol: stream.symbol || 'N/A',
+                description: stream.description || 'No description available',
+                viewers: stream.num_participants || 0,
+                likes: stream.reply_count || 0,
+                status: stream.is_currently_live ? "live" : "offline",
+                tags: this.generateTags(stream),
+                thumbnail: stream.thumbnail || stream.image_uri || 'https://via.placeholder.com/300x200/667eea/ffffff?text=No+Image',
+                marketCap: stream.usd_market_cap || 0,
+                holders: stream.holders || 0,
+                chatMembers: stream.chat_members || 0,
+                twitter: stream.twitter,
+                website: stream.website,
+                created: stream.created_timestamp,
+                lastTrade: stream.last_trade_timestamp,
+                chart: stream.chart || []
+            }));
+        } catch (error) {
+            console.error('Error fetching live data:', error);
+            // Fallback to mock data if API fails
+            return this.getFallbackData();
+        }
+    }
+
+    generateTags(stream) {
+        const tags = [];
         
-        // Mock data for demonstration
+        // Add status-based tags
+        if (stream.is_currently_live) tags.push('Live');
+        if (stream.num_participants > 100) tags.push('Popular');
+        if (stream.usd_market_cap > 50000) tags.push('High Cap');
+        if (stream.reply_count > 50) tags.push('Active');
+        
+        // Add symbol as tag
+        if (stream.symbol) tags.push(stream.symbol);
+        
+        // Add time-based tags
+        const now = Date.now();
+        const created = parseInt(stream.created_timestamp);
+        const hoursSinceCreated = (now - created) / (1000 * 60 * 60);
+        
+        if (hoursSinceCreated < 1) tags.push('New');
+        if (hoursSinceCreated < 24) tags.push('Fresh');
+        
+        return tags.slice(0, 4); // Limit to 4 tags
+    }
+
+    getFallbackData() {
+        // Fallback data if API fails
         return [
             {
-                id: 1,
-                title: "PEPE Token Analysis",
-                description: "Deep dive into PEPE token performance and market trends",
-                viewers: 1250,
-                likes: 89,
-                status: "live",
-                tags: ["PEPE", "Analysis", "Trending"],
-                thumbnail: "https://via.placeholder.com/300x200/667eea/ffffff?text=PEPE+Analysis"
-            },
-            {
-                id: 2,
-                title: "New Token Launch",
-                description: "Live coverage of the latest token launch on PumpFun",
-                viewers: 2100,
-                likes: 156,
-                status: "live",
-                tags: ["Launch", "New", "Hot"],
-                thumbnail: "https://via.placeholder.com/300x200/28a745/ffffff?text=New+Launch"
-            },
-            {
-                id: 3,
-                title: "Market Overview",
-                description: "Weekly market analysis and upcoming opportunities",
-                viewers: 890,
-                likes: 67,
+                id: 'fallback-1',
+                title: "API Unavailable",
+                symbol: "API",
+                description: "Unable to fetch live data. Please try again later.",
+                viewers: 0,
+                likes: 0,
                 status: "offline",
-                tags: ["Market", "Analysis", "Weekly"],
-                thumbnail: "https://via.placeholder.com/300x200/ffc107/ffffff?text=Market+Overview"
-            },
-            {
-                id: 4,
-                title: "Technical Analysis",
-                description: "Advanced technical analysis for crypto traders",
-                viewers: 1750,
-                likes: 134,
-                status: "live",
-                tags: ["Technical", "Trading", "Advanced"],
-                thumbnail: "https://via.placeholder.com/300x200/dc3545/ffffff?text=Technical+Analysis"
-            },
-            {
-                id: 5,
-                title: "Community Discussion",
-                description: "Open discussion about the latest crypto trends",
-                viewers: 650,
-                likes: 45,
-                status: "live",
-                tags: ["Community", "Discussion", "Trends"],
-                thumbnail: "https://via.placeholder.com/300x200/6f42c1/ffffff?text=Community+Talk"
-            },
-            {
-                id: 6,
-                title: "DeFi Strategies",
-                description: "Exploring DeFi opportunities and strategies",
-                viewers: 1100,
-                likes: 78,
-                status: "offline",
-                tags: ["DeFi", "Strategies", "Opportunities"],
-                thumbnail: "https://via.placeholder.com/300x200/20c997/ffffff?text=DeFi+Strategies"
+                tags: ["API", "Error"],
+                thumbnail: "https://via.placeholder.com/300x200/dc3545/ffffff?text=API+Error",
+                marketCap: 0,
+                holders: 0,
+                chatMembers: 0
             }
         ];
     }
@@ -135,11 +147,12 @@ class PumpFunApp {
         const term = searchTerm.toLowerCase();
         this.filteredStreams = this.streams.filter(stream => {
             const matchesSearch = stream.title.toLowerCase().includes(term) ||
+                                stream.symbol.toLowerCase().includes(term) ||
                                 stream.description.toLowerCase().includes(term) ||
                                 stream.tags.some(tag => tag.toLowerCase().includes(term));
             
             const matchesFilter = this.currentFilter === 'all' ||
-                                (this.currentFilter === 'trending' && stream.viewers > 1000) ||
+                                (this.currentFilter === 'trending' && stream.viewers > 100) ||
                                 (this.currentFilter === 'new' && stream.tags.includes('New'));
             
             return matchesSearch && matchesFilter;
@@ -185,25 +198,45 @@ class PumpFunApp {
     }
 
     createStreamCard(stream) {
+        const marketCapFormatted = stream.marketCap ? `$${this.formatNumber(stream.marketCap)}` : 'N/A';
+        const timeAgo = this.getTimeAgo(stream.created);
+        
         return `
-            <div class="stream-card" onclick="this.handleStreamClick(${stream.id})">
+            <div class="stream-card" onclick="app.handleStreamClick('${stream.id}')">
                 <div class="stream-header">
                     <div>
                         <div class="stream-title">${stream.title}</div>
+                        <div class="stream-symbol">${stream.symbol}</div>
                         <div class="stream-status ${stream.status === 'live' ? 'status-live' : 'status-offline'}">
                             ${stream.status === 'live' ? '🔴 LIVE' : '⚫ OFFLINE'}
                         </div>
+                    </div>
+                    <div class="stream-thumbnail">
+                        <img src="${stream.thumbnail}" alt="${stream.title}" onerror="this.src='https://via.placeholder.com/60x60/667eea/ffffff?text=No+Image'">
                     </div>
                 </div>
                 
                 <div class="stream-stats">
                     <div class="stat">
                         <div class="stat-value">${this.formatNumber(stream.viewers)}</div>
-                        <div class="stat-label">Viewers</div>
+                        <div class="stat-label">Participants</div>
                     </div>
                     <div class="stat">
-                        <div class="stat-value">${stream.likes}</div>
-                        <div class="stat-label">Likes</div>
+                        <div class="stat-value">${this.formatNumber(stream.holders)}</div>
+                        <div class="stat-label">Holders</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-value">${this.formatNumber(stream.chatMembers)}</div>
+                        <div class="stat-label">Chat</div>
+                    </div>
+                </div>
+                
+                <div class="market-info">
+                    <div class="market-cap">
+                        <strong>Market Cap:</strong> ${marketCapFormatted}
+                    </div>
+                    <div class="time-ago">
+                        <strong>Created:</strong> ${timeAgo}
                     </div>
                 </div>
                 
@@ -213,6 +246,11 @@ class PumpFunApp {
                 
                 <div class="stream-tags">
                     ${stream.tags.map(tag => `<span class="tag">${tag}</span>`).join('')}
+                </div>
+                
+                <div class="stream-links">
+                    ${stream.twitter ? `<a href="${stream.twitter}" target="_blank" class="link-btn twitter">🐦 Twitter</a>` : ''}
+                    ${stream.website ? `<a href="${stream.website}" target="_blank" class="link-btn website">🌐 Website</a>` : ''}
                 </div>
             </div>
         `;
@@ -277,6 +315,25 @@ class PumpFunApp {
             return (num / 1000).toFixed(1) + 'K';
         }
         return num.toString();
+    }
+
+    getTimeAgo(timestamp) {
+        if (!timestamp) return 'Unknown';
+        
+        const now = Date.now();
+        const created = parseInt(timestamp);
+        const diffMs = now - created;
+        const diffMinutes = Math.floor(diffMs / (1000 * 60));
+        const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+        const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+        
+        if (diffMinutes < 60) {
+            return `${diffMinutes}m ago`;
+        } else if (diffHours < 24) {
+            return `${diffHours}h ago`;
+        } else {
+            return `${diffDays}d ago`;
+        }
     }
 
     setupAutoRefresh() {
